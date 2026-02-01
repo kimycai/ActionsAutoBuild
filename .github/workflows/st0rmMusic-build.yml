@@ -1,0 +1,113 @@
+
+name: st0rmMusic 完整自动化构建（含FFmpeg+所有依赖）
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # 手动触发（优先推荐调试）
+
+jobs:
+  build-st0rm-music:
+    runs-on: ubuntu-latest # 适配FFmpeg Linux64静态包
+    steps:
+      # 步骤1：拉取仓库（含子模块，核心依赖）
+      - name: 拉取st0rmMusicPlayer仓库（含子模块）
+        uses: actions/checkout@v4
+        with:
+          repository: sn0wst0rm/st0rmMusicPlayer
+          ref: main
+          submodules: recursive
+          path: st0rmMusicPlayer
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 步骤2：下载并配置FFmpeg（核心修复：环境变量即时生效+双重验证）
+      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载，稳定版）
+        run: |
+          # 定义FFmpeg下载地址（与需求完全一致）
+          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          # 完整curl参数：跟随重定向+显示进度+失败报错+保留原文件名
+          curl -L -O -S -f $FFMPEG_URL
+          
+          # 校验压缩包是否存在，避免解压失败
+          FFMPEG_TAR="ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          if [ ! -f "$FFMPEG_TAR" ]; then
+            echo "ERROR: FFmpeg压缩包下载失败，文件不存在！"
+            ls -l # 列出目录文件，便于调试
+            exit 1
+          fi
+
+          # 解压到系统级目录/opt/ffmpeg，去掉顶层目录避免路径嵌套
+          sudo mkdir -p /opt/ffmpeg
+          sudo tar -xJf "$FFMPEG_TAR" -C /opt/ffmpeg --strip-components=1
+          
+          # 1. 配置Action全局PATH（对后续所有步骤生效）
+          echo "/opt/ffmpeg/bin" >> $GITHUB_PATH
+          # 2. 核心修复：手动刷新环境变量，让当前步骤即时识别ffmpeg
+          export PATH="/opt/ffmpeg/bin:$PATH"
+          
+          # 双重验证FFmpeg安装成功（兜底+确保可用）
+          echo "=== FFmpeg安装验证 ==="
+          # 方式1：直接调用（验证环境变量生效）
+          ffmpeg -version
+          ffprobe -version
+          # 方式2：绝对路径调用（兜底方案，避免环境变量问题）
+          /opt/ffmpeg/bin/ffmpeg -version
+          echo "=== FFmpeg安装完成，全局可用 ==="
+
+      # 步骤3：配置Node.js 20.19.0（适配Prisma，解决版本兼容）
+      - name: 配置Node.js 20.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: 'npm'
+          cache-dependency-path: st0rmMusicPlayer/package-lock.json
+
+      # 步骤4：配置Python 3.9（匹配setup.sh要求）
+      - name: 配置Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      # 步骤5：安装Ubuntu系统依赖（setup.sh必选python3-venv）
+      - name: 安装系统级依赖
+        run: sudo apt update && sudo apt install -y python3-venv
+
+      # 步骤6：赋予setup.sh执行权限
+      - name: 赋予安装脚本执行权限
+        run: chmod +x st0rmMusicPlayer/setup.sh
+
+      # 步骤7：无交互执行setup.sh（echo ""模拟回车，跳过数据库交互）
+      - name: 无交互执行安装脚本
+        run: |
+          cd st0rmMusicPlayer
+          echo "" | bash ./setup.sh
+        env:
+          CI: true # 标记CI环境，避免脚本等待手动输入
+
+      # 步骤8：修复缺失依赖@tailwindcss/postcss（解决CSS编译报错）
+      - name: 安装缺失的Tailwind PostCSS依赖
+        run: |
+          cd st0rmMusicPlayer
+          npm install @tailwindcss/postcss --save-dev
+
+      # 步骤9：构建Next.js生产包（带--webpack参数，匹配项目命令）
+      - name: 构建Next.js生产产物
+        run: |
+          cd st0rmMusicPlayer
+          npm run build --webpack
+
+      # 步骤10：上传构建产物（含所有运行依赖，方便部署）
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: st0rmMusicPlayer-build-ubuntu-ffmpeg8.0
+          path: |
+            st0rmMusicPlayer/.next/
+            st0rmMusicPlayer/scripts/venv/
+            st0rmMusicPlayer/library.db
+            st0rmMusicPlayer/.env
+            st0rmMusicPlayer/node_modules/
+            st0rmMusicPlayer/public/
+          retention-days: 14

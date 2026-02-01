@@ -1,17 +1,13 @@
-
 name: st0rmMusic 完整自动化构建（含FFmpeg+所有依赖）
+# 纯手动触发，仅保留workflow_dispatch
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch: # 手动触发（优先推荐调试）
+  workflow_dispatch:
 
 jobs:
   build-st0rm-music:
-    runs-on: ubuntu-latest # 适配FFmpeg Linux64静态包
+    runs-on: ubuntu-latest # 适配FFmpeg Linux64静态包+项目原生环境
     steps:
-      # 步骤1：拉取仓库（含子模块，核心依赖）
+      # 步骤1：拉取仓库（含子模块，核心依赖，拉取到st0rmMusicPlayer目录）
       - name: 拉取st0rmMusicPlayer仓库（含子模块）
         uses: actions/checkout@v4
         with:
@@ -21,41 +17,32 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步骤2：下载并配置FFmpeg（核心修复：环境变量即时生效+双重验证）
-      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载，稳定版）
+      # 步骤2：下载并配置FFmpeg（环境变量即时生效+双重验证，稳定版）
+      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载）
         run: |
-          # 定义FFmpeg下载地址（与需求完全一致）
           FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
-          # 完整curl参数：跟随重定向+显示进度+失败报错+保留原文件名
           curl -L -O -S -f $FFMPEG_URL
           
-          # 校验压缩包是否存在，避免解压失败
           FFMPEG_TAR="ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
           if [ ! -f "$FFMPEG_TAR" ]; then
             echo "ERROR: FFmpeg压缩包下载失败，文件不存在！"
-            ls -l # 列出目录文件，便于调试
+            ls -l
             exit 1
           fi
 
-          # 解压到系统级目录/opt/ffmpeg，去掉顶层目录避免路径嵌套
           sudo mkdir -p /opt/ffmpeg
           sudo tar -xJf "$FFMPEG_TAR" -C /opt/ffmpeg --strip-components=1
           
-          # 1. 配置Action全局PATH（对后续所有步骤生效）
           echo "/opt/ffmpeg/bin" >> $GITHUB_PATH
-          # 2. 核心修复：手动刷新环境变量，让当前步骤即时识别ffmpeg
           export PATH="/opt/ffmpeg/bin:$PATH"
           
-          # 双重验证FFmpeg安装成功（兜底+确保可用）
           echo "=== FFmpeg安装验证 ==="
-          # 方式1：直接调用（验证环境变量生效）
           ffmpeg -version
           ffprobe -version
-          # 方式2：绝对路径调用（兜底方案，避免环境变量问题）
           /opt/ffmpeg/bin/ffmpeg -version
           echo "=== FFmpeg安装完成，全局可用 ==="
 
-      # 步骤3：配置Node.js 20.19.0（适配Prisma，解决版本兼容）
+      # 步骤3：配置Node.js 20.19.0（适配Prisma，解决版本兼容问题）
       - name: 配置Node.js 20.19.0
         uses: actions/setup-node@v4
         with:
@@ -63,7 +50,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: st0rmMusicPlayer/package-lock.json
 
-      # 步骤4：配置Python 3.9（匹配setup.sh要求）
+      # 步骤4：配置Python 3.9（匹配setup.sh脚本强制要求）
       - name: 配置Python 3.9
         uses: actions/setup-python@v5
         with:
@@ -74,11 +61,11 @@ jobs:
       - name: 安装系统级依赖
         run: sudo apt update && sudo apt install -y python3-venv
 
-      # 步骤6：赋予setup.sh执行权限
+      # 步骤6：赋予setup.sh执行权限（避免权限拒绝错误）
       - name: 赋予安装脚本执行权限
         run: chmod +x st0rmMusicPlayer/setup.sh
 
-      # 步骤7：无交互执行setup.sh（echo ""模拟回车，跳过数据库交互）
+      # 步骤7：无交互执行setup.sh（echo ""模拟回车，跳过数据库路径交互）
       - name: 无交互执行安装脚本
         run: |
           cd st0rmMusicPlayer
@@ -86,28 +73,22 @@ jobs:
         env:
           CI: true # 标记CI环境，避免脚本等待手动输入
 
-      # 步骤8：修复缺失依赖@tailwindcss/postcss（解决CSS编译报错）
+      # 步骤8：修复缺失依赖@tailwindcss/postcss（解决Next.js CSS编译报错）
       - name: 安装缺失的Tailwind PostCSS依赖
         run: |
           cd st0rmMusicPlayer
           npm install @tailwindcss/postcss --save-dev
 
-      # 步骤9：构建Next.js生产包（带--webpack参数，匹配项目命令）
+      # 步骤9：构建Next.js生产包（带--webpack参数，匹配项目原构建命令）
       - name: 构建Next.js生产产物
         run: |
           cd st0rmMusicPlayer
           npm run build --webpack
 
-      # 步骤10：上传构建产物（含所有运行依赖，方便部署）
-      - name: 上传构建产物
+      # 步骤10：上传构建产物【核心修复】- 完整上传st0rmMusicPlayer目录所有内容
+      - name: 上传完整构建产物（st0rmMusicPlayer目录全量）
         uses: actions/upload-artifact@v4
         with:
           name: st0rmMusicPlayer-build-ubuntu-ffmpeg8.0
-          path: |
-            st0rmMusicPlayer/.next/
-            st0rmMusicPlayer/scripts/venv/
-            st0rmMusicPlayer/library.db
-            st0rmMusicPlayer/.env
-            st0rmMusicPlayer/node_modules/
-            st0rmMusicPlayer/public/
-          retention-days: 14
+          path: st0rmMusicPlayer/ # 直接指定目录，全量上传内部所有文件/子目录
+          retention-days: 14 # 产物保留14天，可按需调整（生产环境可适当延长）

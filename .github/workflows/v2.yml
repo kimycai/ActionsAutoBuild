@@ -62,7 +62,7 @@ jobs:
 
       # 步骤5：安装Ubuntu系统依赖（清理缓存减少耗时）
       - name: 安装系统级依赖
-        run: sudo apt update && sudo apt install -y python3-venv && rm -rf /var/lib/apt/lists/*
+        run: sudo apt update && sudo apt install -y python3-venv && sudo rm -rf /var/lib/apt/lists/*
 
       # 步骤6：初始化项目运行环境（赋权+执行setup.sh）
       - name: 初始化项目运行环境

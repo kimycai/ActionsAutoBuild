@@ -1,0 +1,114 @@
+name: st0rmMusic 完整自动化构建（含FFmpeg+所有依赖）
+# 触发规则：main分支推送自动执行 + 保留手动触发
+on:
+  push:
+    branches: [ main ] # 仅main分支推送代码自动触发
+  workflow_dispatch:    # 保留手动触发能力，按需执行
+
+jobs:
+  build-st0rm-music:
+    runs-on: ubuntu-24.04 # 锁定运行环境为Ubuntu 24.04（官方原生支持）
+    steps:
+      # 步骤1：拉取仓库（含子模块，核心依赖，拉取到st0rmMusicPlayer目录）
+      - name: 拉取st0rmMusicPlayer仓库（含子模块）
+        uses: actions/checkout@v4
+        with:
+          repository: sn0wst0rm/st0rmMusicPlayer
+          ref: main
+          submodules: recursive
+          path: st0rmMusicPlayer
+          token: ${{ secrets.GITHUB_TOKEN }} # 拉取源仓库用内置令牌即可
+
+      # 步骤2：下载并配置FFmpeg（环境变量即时生效+双重验证，稳定版）
+      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载）
+        run: |
+          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          curl -L -O -S -f $FFMPEG_URL
+          
+          FFMPEG_TAR="ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          if [ ! -f "$FFMPEG_TAR" ]; then
+            echo "ERROR: FFmpeg压缩包下载失败，文件不存在！"
+            ls -l
+            exit 1
+          fi
+
+          sudo mkdir -p /opt/ffmpeg
+          sudo tar -xJf "$FFMPEG_TAR" -C /opt/ffmpeg --strip-components=1
+          
+          echo "/opt/ffmpeg/bin" >> $GITHUB_PATH
+          export PATH="/opt/ffmpeg/bin:$PATH"
+          
+          echo "=== FFmpeg安装验证 ==="
+          ffmpeg -version
+          ffprobe -version
+          /opt/ffmpeg/bin/ffmpeg -version
+          echo "=== FFmpeg安装完成，全局可用 ==="
+
+      # 步骤3：配置Node.js 20.19.0（适配Prisma，解决版本兼容问题）
+      - name: 配置Node.js 20.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: 'npm'
+          cache-dependency-path: st0rmMusicPlayer/package-lock.json
+
+      # 步骤4：配置Python 3.9（匹配setup.sh脚本强制要求，适配Ubuntu 24.04）
+      - name: 配置Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      # 步骤5：安装Ubuntu 24.04系统依赖（setup.sh必选python3-venv，适配24.04源）
+      - name: 安装系统级依赖
+        run: sudo apt update -y && sudo apt install -y python3-venv --no-install-recommends
+
+      # 步骤6：赋予setup.sh执行权限（避免权限拒绝错误）
+      - name: 赋予安装脚本执行权限
+        run: chmod +x st0rmMusicPlayer/setup.sh
+
+      # 步骤7：无交互执行setup.sh（核心步骤，完成所有依赖+构建）
+      - name: 无交互执行安装脚本
+        run: |
+          cd st0rmMusicPlayer
+          echo "" | bash ./setup.sh
+        env:
+          CI: true # 标记CI环境，避免脚本等待手动输入
+
+      # 步骤8：上传完整构建产物（全量目录，可直接部署）
+      - name: 上传完整构建产物（st0rmMusicPlayer目录全量）
+        uses: actions/upload-artifact@v4
+        with:
+          name: st0rmMusicPlayer-build-ubuntu2404-ffmpeg8.0
+          path: st0rmMusicPlayer/ # 全量上传，包含所有依赖/构建产物/配置
+          retention-days: 14 # 产物保留14天，生产环境可调整为30/90
+
+      # 步骤9：将st0rmMusicPlayer全量推送到kimycai/ActionsAutoBuild仓库（核心修改为WRAPPER_PUSH_TOKEN）
+      - name: 将st0rmMusicPlayer全量推送到kimycai/ActionsAutoBuild仓库
+        run: |
+          # 1. 配置Git全局信息（Actions运行环境无默认配置，必须设置）
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 2. 克隆目标仓库（使用WRAPPER_PUSH_TOKEN实现免密跨账号克隆）
+          git clone https://kimycai:${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/ActionsAutoBuild.git tmp-ActionsAutoBuild
+          
+          # 3. 清空目标仓库原有内容（全量覆盖，避免历史文件残留）
+          rm -rf tmp-ActionsAutoBuild/*
+          
+          # 4. 复制构建好的st0rmMusicPlayer全量文件到目标仓库目录
+          cp -r st0rmMusicPlayer/* tmp-ActionsAutoBuild/
+          
+          # 5. 进入目标仓库目录，执行提交和推送（自动推送到main分支）
+          cd tmp-ActionsAutoBuild
+          git add .
+          git commit -m "Auto push st0rmMusicPlayer build [$(date +%Y-%m-%d_%H:%M:%S)]"
+          git push origin main -f # -f强制推送，避免少量历史冲突导致失败
+          
+          # 6. 清理临时目录，保持环境整洁
+          cd ..
+          rm -rf tmp-ActionsAutoBuild
+        env:
+          # 适配CI环境，避免Git交互和SSL验证问题
+          GIT_SSL_NO_VERIFY: true
+          CI: true

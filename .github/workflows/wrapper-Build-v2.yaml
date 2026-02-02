@@ -1,12 +1,12 @@
-name: wrapper-Build-v1 sucessful
+name: wrapper-Build-Push-GitHub
 on:
-  workflow_dispatch:  # 仅手动触发，如需push自动触发可添加 on: [push]
+  workflow_dispatch:  # 仅手动触发，如需提交自动触发可添加：on: [push]
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-24.04  # Ubuntu 24.04构建环境
+    runs-on: ubuntu-24.04  # 保持原有Ubuntu 24.04编译环境
     steps:
-      # 1. 拉取官方wrapper源码到CI根目录wrapper/子目录（原有编译前置步骤）
+      # 1. 拉取官方wrapper源码到CI根目录wrapper/子目录
       - name: Checkout WorldObservationLog/wrapper source code
         uses: actions/checkout@v4
         with:
@@ -14,38 +14,38 @@ jobs:
           path: wrapper
           fetch-depth: 1
 
-      # 2. 安装编译依赖（原有步骤，兼容Ubuntu24.04）
+      # 2. 安装编译依赖（兼容Ubuntu24.04，与原有脚本一致）
       - name: Install build dependencies
         run: |
           sudo apt update -y
           sudo apt install -y aria2 build-essential cmake wget unzip git
           sudo apt update --fix-missing -y
 
-      # 3. 安装LLVM（原有步骤，与官方一致）
+      # 3. 安装LLVM（与官方编译规则一致）
       - name: Install LLVM
         run: sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 
-      # 4. 配置Android NDK r23b（原有步骤，aria2c下载）
+      # 4. 配置Android NDK r23b（aria2c高速下载，原有逻辑）
       - name: Set up Android NDK r23b
         run: | 
           aria2c -o android-ndk-r23b-linux.zip https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
           unzip -q -d ~ android-ndk-r23b-linux.zip
         working-directory: wrapper
 
-      # 5. 配置NDK环境变量（原有步骤，Ubuntu24.04兼容性）
+      # 5. 显式配置NDK环境变量（Ubuntu24.04兼容性优化）
       - name: Set ANDROID_NDK_HOME
         run: echo "ANDROID_NDK_HOME=~/android-ndk-r23b" >> $GITHUB_ENV
 
-      # 6. 核心构建流程（原有步骤，编译生成wrapper/wrapper）
+      # 6. 核心构建流程（编译生成wrapper/wrapper可执行文件）
       - name: Build wrapper executable
         run: |
           mkdir -p build
           cd build
           cmake ..
-          make -j$(nproc)
+          make -j$(nproc)  # 多核编译，不改变产物结果
         working-directory: wrapper
 
-      # 7. 校验wrapper可执行文件（原有步骤，确保文件存在且可执行）
+      # 7. 严格校验wrapper产物（存在+可执行权限，避免推送无效文件）
       - name: Verify wrapper executable exists
         run: |
           EXEC_PATH="wrapper/wrapper"
@@ -54,48 +54,48 @@ jobs:
             exit 1
           fi
           echo "✅ 产物验证通过：$EXEC_PATH（存在且具备可执行权限）"
-          ls -l $EXEC_PATH
+          ls -l $EXEC_PATH  # 输出文件信息，便于日志排查
 
-      # 8. 上传GitHub产物（原有步骤，备用手动下载）
+      # 8. 上传GitHub Action产物（备用，手动下载兜底）
       - name: Upload wrapper executable artifact
         uses: actions/upload-artifact@v4
         with:
           name: wrapper-executable-ubuntu2404
           path: wrapper/wrapper
 
-      # -------------------------- 以下为Git命令推送核心步骤 --------------------------
-      # 9. 配置Git全局用户信息（Gitee提交记录识别，必填）
+      # -------------------------- Git推送到目标GitHub仓库核心步骤 --------------------------
+      # 9. 配置Git全局用户信息（提交记录识别用，必填）
       - name: Configure Git global user info
         run: |
-          git config --global user.name "kimycai"  # 你的Gitee用户名
-          git config --global user.email "kimycai@users.noreply.gitee.com"  # 匿名邮箱/你的Gitee绑定邮箱
+          git config --global user.name "kimycai"  # 你的GitHub用户名
+          git config --global user.email "kimycai@users.noreply.github.com"  # GitHub匿名邮箱/绑定邮箱
 
-      # 10. 拉取你的Gitee仓库（kimycai/amdl-web-manager）到CI环境，生成本地副本
-      - name: Checkout Gitee repo (kimycai/amdl-web-manager)
+      # 10. 拉取目标GitHub仓库（kimycai/amdl-web-manager）生成本地副本
+      - name: Checkout target GitHub repo (kimycai/amdl-web-manager)
         uses: actions/checkout@v4
         with:
-          repository: kimycai/amdl-web-manager  # 你的Gitee仓库（用户名/仓库名）
-          ref: main  # 推送目标分支（main/master，与Gitee仓库一致）
-          token: ${{ secrets.GITEE_TOKEN }}  # 从GitHub Secrets读取Gitee令牌
-          path: gitee-repo  # 仓库存放目录，与源码目录隔离，避免冲突
+          repository: kimycai/amdl-web-manager  # 目标仓库地址
+          ref: main  # 推送目标分支（main/master，按需修改）
+          token: ${{ secrets.WRAPPER_PUSH_TOKEN }}  # 认证令牌（已配置Secrets）
+          path: target-repo  # 目标仓库存放目录，与源码目录隔离
 
-      # 11. 复制编译好的wrapper到Gitee仓库本地副本（强制覆盖原有文件）
-      - name: Copy wrapper to Gitee repo directory
+      # 11. 复制编译好的wrapper到目标仓库本地副本（强制覆盖原有文件）
+      - name: Copy wrapper to target repo directory
         run: |
-          cp -f wrapper/wrapper gitee-repo/  # -f：强制覆盖Gitee仓库中原有wrapper文件
-          ls -l gitee-repo/wrapper  # 验证复制结果，日志可查
+          cp -f wrapper/wrapper target-repo/  # -f：强制覆盖，确保最新版本
+          ls -l target-repo/wrapper  # 验证复制结果，日志可查文件大小/权限
 
-      # 12. Git命令提交+推送到Gitee仓库（条件推送，无变更则跳过）
-      - name: Push wrapper to Gitee via Git commands
+      # 12. Git命令提交+推送到目标GitHub仓库（条件推送，无变更则跳过）
+      - name: Push wrapper to GitHub (kimycai/amdl-web-manager)
         run: |
-          cd gitee-repo  # 进入Gitee仓库本地副本目录（必须）
-          # 检查是否有文件变更，避免无意义的空提交
+          cd target-repo  # 进入目标仓库本地副本目录（必须）
+          # 仅检查wrapper文件变更，避免无意义提交
           if git status --porcelain | grep -q "wrapper"; then
-            git add wrapper  # 仅添加wrapper文件，不改动仓库其他内容
+            git add wrapper  # 仅添加wrapper单个文件，不改动仓库其他内容
             git commit -m "Auto update wrapper executable [Ubuntu24.04 build] $(date +%Y-%m-%d %H:%M:%S)"
-            git push origin main  # 推送到Gitee的main分支（与步骤10的ref一致）
-            echo -e "\n✅ 成功！wrapper已通过Git命令推送到Gitee仓库："
-            echo "https://gitee.com/kimycai/amdl-web-manager/blob/main/wrapper"
+            git push origin main  # 推送到目标分支，与步骤10的ref保持一致
+            echo -e "\n✅ 成功！wrapper已推送到GitHub仓库："
+            echo "https://github.com/kimycai/amdl-web-manager/blob/main/wrapper"
           else
-            echo -e "\nℹ️  wrapper文件无变更，无需推送到Gitee仓库"
+            echo -e "\nℹ️  wrapper文件无变更，无需推送到GitHub仓库"
           fi

@@ -1,4 +1,4 @@
-name: wrapper-Build-v2
+name: wrapper-Build-v1 sucessful
 on:
   workflow_dispatch:  # 仅手动触发
 
@@ -54,6 +54,7 @@ jobs:
             exit 1
           fi
           echo "✅ 产物验证通过：$EXEC_PATH（存在且具备可执行权限）"
+          ls -l $EXEC_PATH  # 输出文件信息，日志可查
 
       # 8. 上传wrapper作为GitHub Action产物（备用，可手动下载）
       - name: Upload wrapper executable artifact
@@ -62,39 +63,29 @@ jobs:
           name: wrapper-executable-ubuntu2404
           path: wrapper/wrapper
 
-      # 9. 配置Git全局信息（适配Gitee提交，识别提交者）
-      - name: Configure Git for Gitee
+      # 9. 核心：直接推送wrapper到Gitee仓库（无需拉取仓库，API方式）
+      - name: Push wrapper directly to Gitee (kimycai/amdl-web-manager)
         run: |
-          git config --global user.name "kimycai"
-          git config --global user.email "kimycai@users.noreply.gitee.com"
-
-      # 10. 拉取你的Gitee仓库（kimycai/amdl-web-manager）到CI环境
-      - name: Checkout your Gitee repository (kimycai/amdl-web-manager)
-        uses: actions/checkout@v4
-        with:
-          repository: kimycai/amdl-web-manager
-          ref: main  # 推送目标分支（默认main，若为master可自行修改）
-          token: ${{ secrets.GITEE_TOKEN }}  # 你的Gitee令牌（已配置在GitHub Secrets）
-          path: gitee-repo  # 仓库存放目录，与源码目录隔离，避免冲突
-
-      # 11. 复制编译好的wrapper到Gitee仓库目录（强制覆盖原有文件）
-      - name: Copy wrapper to Gitee repo directory
-        run: |
-          cp -f wrapper/wrapper gitee-repo/
-          ls -l gitee-repo/wrapper  # 验证复制结果，日志可查文件信息
-
-      # 12. 推送wrapper到Gitee仓库（条件推送，无变更则跳过）
-      - name: Push wrapper to Gitee (kimycai/amdl-web-manager)
-        run: |
-          cd gitee-repo
-          # 检查wrapper文件是否有变更，避免无意义提交
-          if git status --porcelain | grep -q "wrapper"; then
-            git add wrapper
-            git commit -m "Auto update wrapper executable [Ubuntu24.04 build]"
-            git push origin main
-            echo "✅ wrapper可执行文件已成功推送到Gitee仓库：kimycai/amdl-web-manager！"
-          else
-            echo "ℹ️  wrapper文件无变更，无需推送至Gitee仓库"
-          fi
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          # 定义关键参数（已替换你的信息，无需修改）
+          GITEE_USER="kimycai"
+          GITEE_REPO="amdl-web-manager"
+          GITEE_BRANCH="main"  # 推送的目标分支
+          FILE_PATH="wrapper"  # 仓库中存放的文件路径（根目录下的wrapper）
+          COMMIT_MSG="Auto update wrapper executable [Ubuntu24.04 build]"
+          
+          # 将可执行文件转为Base64编码（Gitee API要求文件内容为Base64）
+          FILE_CONTENT=$(base64 -w 0 wrapper/wrapper)
+          
+          # 调用Gitee API：创建/更新文件（自动覆盖原有文件）
+          curl -X PUT "https://gitee.com/api/v5/repos/${GITEE_USER}/${GITEE_REPO}/contents/${FILE_PATH}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token ${{ secrets.GITEE_TOKEN }}" \
+            -d '{
+              "access_token": "${{ secrets.GITEE_TOKEN }}",
+              "branch": "'"${GITEE_BRANCH}"'",
+              "content": "'"${FILE_CONTENT}"'",
+              "message": "'"${COMMIT_MSG}"'"
+            }'
+          
+          echo -e "\n✅ wrapper可执行文件已通过API直接推送到Gitee仓库！"
+          echo "仓库地址：https://gitee.com/${GITEE_USER}/${GITEE_REPO}/blob/${GITEE_BRANCH}/${FILE_PATH}"

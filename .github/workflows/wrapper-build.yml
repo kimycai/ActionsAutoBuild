@@ -2,10 +2,7 @@ name: Build from Source
 
 on:
   workflow_dispatch:
-    inputs:
-      reason:
-        description: '手动触发原因'
-        required: true
+
 
 jobs:
   build:

@@ -1,4 +1,4 @@
-name: wrapper-Build-v1
+name: wrapper-Build-v1 sucessful
 on:
   workflow_dispatch:  # 仅手动触发
 

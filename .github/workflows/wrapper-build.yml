@@ -1,8 +1,7 @@
-name: Build from Source
+name: Build wrapper from Source
 
 on:
   workflow_dispatch:
-
 
 jobs:
   build:
@@ -13,7 +12,7 @@ jobs:
     - name: Install Build Tools
       run: |
         sudo apt update
-        sudo apt install build - essential cmake wget unzip git -y
+        sudo apt install build-essential cmake wget unzip git -y
     - name: Install LLVM
       run: sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
     - name: Download Android NDK r23b

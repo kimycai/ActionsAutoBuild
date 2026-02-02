@@ -1,9 +1,6 @@
 name: Build apple-music-rip (Ubuntu 24.04)
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+
   workflow_dispatch: # 手动触发，优先级最高
 
 # 并发控制：避免同分支重复构建

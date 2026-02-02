@@ -13,6 +13,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt install build-essential cmake wget unzip git -y
+        cmake --version # 检查cmake是否安装成功
     - name: Install LLVM
       run: sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
     - name: Download Android NDK r23b
@@ -25,5 +26,6 @@ jobs:
         cd wrapper
         mkdir build
         cd build
+        echo "PATH: $PATH" # 打印PATH环境变量
         cmake..
         make -j$(nproc)

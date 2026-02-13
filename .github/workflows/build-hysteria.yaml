@@ -20,7 +20,7 @@ jobs:
         run: |
           git clone https://github.com/apernet/hysteria.git hysteria-src
           cd hysteria-src
-          git checkout main
+          git checkout master
 
       - name: Setup Go
         uses: actions/setup-go@v5

@@ -14,7 +14,6 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: build-hysteria
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clone Hysteria repository
@@ -62,4 +61,5 @@ jobs:
           git config --local user.name "GitHub Action"
           git add .
           git commit -m "Build Hysteria from apernet/hysteria - $(date)" || echo "No changes to commit"
+          git checkout -b build-hysteria 2>/dev/null || git checkout build-hysteria
           git push origin build-hysteria

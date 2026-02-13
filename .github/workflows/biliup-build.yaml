@@ -1,0 +1,145 @@
+name: Weekly Build Biliup CLI (Push Binary Files)
+
+# 触发条件：每周日UTC 0点自动运行 + 手动触发
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # 每周日0点（UTC）自动编译
+  workflow_dispatch:     # 手动触发
+
+permissions:
+  contents: write  # 推送二进制到当前仓库
+  actions: read
+  artifacts: write
+
+env:
+  # 源码仓库配置
+  SOURCE_REPO: "https://github.com/biliup/biliup.git"
+  SOURCE_BRANCH: "master"
+  # 产物推送配置
+  TARGET_BRANCH: "cli-binaries"  # 存储二进制的分支
+  BIN_NAME: "biliup"             # 二进制基础名称
+
+jobs:
+  build-cli:
+    name: Build CLI (${{ matrix.artifact_suffix }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x86_64
+            bin_suffix: ""          # Linux无后缀
+            bin_final_name: "biliup-linux-x86_64"
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_suffix: windows-x86_64
+            bin_suffix: ".exe"      # Windows带exe后缀
+            bin_final_name: "biliup-windows-x86_64.exe"
+
+    steps:
+      ###########################################################################
+      # 第一步：拉取源码仓库代码
+      ###########################################################################
+      - name: Pull Source Code from Remote Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_BRANCH }}
+          submodules: false
+          path: "source-code"
+
+      ###########################################################################
+      # 第二步：准备Rust编译环境
+      ###########################################################################
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      ###########################################################################
+      # 第三步：编译CLI二进制（Release模式）
+      ###########################################################################
+      - name: Build Biliup CLI (Release)
+        working-directory: ./source-code
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} --bin ${{ env.BIN_NAME }} --manifest-path crates/biliup-cli/Cargo.toml
+        env:
+          # 编译优化：减小产物体积
+          CARGO_PROFILE_RELEASE_LTO: true
+          CARGO_PROFILE_RELEASE_STRIP: true
+
+      ###########################################################################
+      # 第四步：优化二进制（Linux剥离符号，Windows无需）
+      ###########################################################################
+      - name: Strip Binary (Linux only)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          strip ./source-code/target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
+
+      ###########################################################################
+      # 第五步：准备二进制文件（重命名+验证）
+      ###########################################################################
+      - name: Prepare Binary File
+        shell: bash
+        run: |
+          # 创建产物目录
+          mkdir -p cli-bin
+          # 原始二进制路径
+          BIN_SRC="./source-code/target/${{ matrix.target }}/release/${{ env.BIN_NAME }}${{ matrix.bin_suffix }}"
+          # 最终二进制名称（带平台标识，避免冲突）
+          BIN_DEST="./cli-bin/${{ matrix.bin_final_name }}"
+          
+          # 复制并命名二进制文件
+          cp $BIN_SRC $BIN_DEST
+          
+          # 验证文件存在且可执行
+          if [[ "${{ matrix.os }}" == "ubuntu-"* ]]; then
+            chmod +x $BIN_DEST
+            ls -lh $BIN_DEST
+            file $BIN_DEST  # 输出文件信息，验证格式
+          else
+            ls -lh $BIN_DEST  # Windows仅验证存在
+          fi
+          
+          # 记录最终文件名，供后续推送使用
+          echo "BIN_FINAL_NAME=${{ matrix.bin_final_name }}" >> $GITHUB_ENV
+
+      ###########################################################################
+      # 第六步：推送二进制文件到当前仓库的指定分支
+      ###########################################################################
+      - name: Push Binary to Current Repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 配置Git身份
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # 检出目标分支（不存在则创建孤儿分支）
+          git checkout ${{ env.TARGET_BRANCH }} || git checkout --orphan ${{ env.TARGET_BRANCH }}
+          # 拉取最新分支（避免冲突）
+          git pull origin ${{ env.TARGET_BRANCH }} || true
+          
+          # 复制二进制文件到分支根目录
+          cp ./cli-bin/${{ env.BIN_FINAL_NAME }} ./
+          
+          # 提交并推送（[skip ci]避免触发重复CI）
+          git add ${{ env.BIN_FINAL_NAME }}
+          git commit -m "Weekly build: ${{ env.BIN_FINAL_NAME }} (${{ github.sha }}) [skip ci]"
+          git push origin ${{ env.TARGET_BRANCH }}
+
+      ###########################################################################
+      # 可选：上传临时Artifact（方便手动下载验证）
+      ###########################################################################
+      - name: Upload Temporary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bin_final_name }}
+          path: ./cli-bin/${{ matrix.bin_final_name }}
+          retention-days: 7  # 临时保留7天
